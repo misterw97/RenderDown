@@ -17,7 +17,6 @@ from mako.runtime import Context
 from mako.lookup import TemplateLookup
 from mako.filters import url_escape
 
-HOME = 'Home'
 _default_module_template = 'ghw-api.md'
 
 class RenderDownError(Exception):
@@ -79,7 +78,7 @@ class DocManager(object):
     variable.
     """
 
-    def __init__(self, top=HOME, directories=None, multifile=True):
+    def __init__(self, top='Index', directories=None, multifile=True):
         if directories is None:
             directories = []
         self._multifile = multifile
@@ -264,31 +263,25 @@ class DocManager(object):
         return re.sub(r'(\n  ){3,}', r'\n  \n  ', li)
 
 
-def renderdown(args):
-    multifile = (args.outdir is not None)
-    kwargs = {}
+def renderdown(template, data, outdir=None, filename=None):
+    multifile = (outdir is not None)
     dirs = []
 
-    if args.assignments:
-        for a in args.assignments:
-            key, value = a.split('=', 1)
-            kwargs[key] = value
-
-    if os.path.isfile(args.template):
-        t = os.path.basename(args.template)
-        dirs.append(os.path.dirname(args.template))
+    if os.path.isfile(template):
+        t = os.path.basename(template)
+        dirs.append(os.path.dirname(template))
     else:
-        t = args.template
+        t = template
 
-    doc = DocManager(directories=dirs, multifile=multifile)
-    doc.render(t, page=HOME, **kwargs)
+    doc = DocManager(directories=dirs, top=filename, multifile=multifile)
+    doc.render(t, page=filename, **data)
 
-    if args.outdir:
-        if not os.path.isdir(args.outdir):
-            os.mkdir(args.outdir)
+    if outdir:
+        if not os.path.isdir(outdir):
+            os.mkdir(outdir)
         for name, text in doc.pages:
             gh_name = github_sanitize_filename(name)
-            with open(os.path.join(args.outdir, gh_name + '.md'), 'w') as out:
+            with open(os.path.join(outdir, gh_name + '.md'), 'w') as out:
                 print(text, file=out)
     else:
         pages = doc.pages
@@ -297,11 +290,22 @@ def renderdown(args):
         for name, text in pages[1:]:
             print('\n\n-----\n\n# {}\n\n'.format(name))
             print(text)
-    if args.list_anchors:
-        for page, name_anchor in doc._anchors.items():
-            for name, anchor in name_anchor.items():
-                print('{}\t{}\t{}'.format(anchor, page, name))
 
+def convertdir(template, datadir, outdir=None):
+    if datadir is None:
+        datadir = 'data'
+    import yaml
+    import os
+    for filename in os.listdir(datadir):
+        if filename.endswith(".yml") or filename.endswith(".yaml"):
+            with open(os.path.join(datadir, filename), 'r') as stream:
+                try:
+                    data = yaml.safe_load(stream)
+                    renderdown(template, data, outdir, os.path.splitext(filename)[0])
+                except yaml.YAMLError as exc:
+                    print(exc)
+        else:
+            continue
 
 def main():
     import argparse
@@ -312,28 +316,19 @@ def main():
         'template', help='the template to render'
     )
     parser.add_argument(
-        '-a', '--assign',
-        action='append', dest='assignments',
-        help='assign a variable to be passed to the template '
-             '(e.g., `--assign title="Hello World"`)'
+        '-d', '--data',
+        help='the input data directory containing yaml files'
     )
     parser.add_argument(
         '-o', '--outdir',
         help='the output directory for generated files; if not given, '
              'all pages are joined and printed to stdout'
     )
-    parser.add_argument(
-        '--list-anchors',
-        action='store_true',
-        help='list the generated anchors at the end.'
-    )
-
     args = parser.parse_args()
+    if not args.template:
+        raise RenderDownError('template must be specified.')
 
-    if not (args.template or args.module):
-        raise RenderDownError('Either --template or --module must be specified.')
-
-    renderdown(args)
+    convertdir(template=args.template, datadir=args.data, outdir=args.outdir)
 
 if __name__ == '__main__':
     main()
